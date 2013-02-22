@@ -70,8 +70,8 @@
 
 #define STBY_KHZ		1
 
-#define HFPLL_NOMINAL_VDD	1050000
-#define HFPLL_LOW_VDD		 850000
+#define HFPLL_LOW_VDD		 815000
+#define HFPLL_MAX_VDD		1350000
 #define HFPLL_LOW_VDD_PLL_L_MAX	0x28
 
 #define SECCLKAGD		BIT(4)
@@ -89,6 +89,8 @@
 /* PTE EFUSE register. */
 #define QFPROM_PTE_ROW0_MSB	(MSM_QFPROM_BASE + 0x00BC)
 #define QFPROM_PTE_ROW1_LSB	(MSM_QFPROM_BASE + 0x00C0)
+
+#define FREQ_TABLE_SIZE    34
 
 enum scalables {
 	CPU0 = 0,
@@ -1580,8 +1582,51 @@ static void __init bus_init(unsigned int init_bw)
 		pr_err("initial bandwidth request failed (%d)\n", ret);
 }
 
+ssize_t vc_get_vdd(char *buf) 
+{
+        int i = 0, len = 0;
+
+        if (buf) {
+                mutex_lock(&driver_lock);
+                while(acpu_freq_tbl[i].speed.khz != 0) i++;
+
+                for(i--; i >= 0; i--) {
+                  if (acpu_freq_tbl[i].use_for_scaling) {
+                        len += sprintf(buf + len, "%umhz: %d mV\n", 
+                                acpu_freq_tbl[i].speed.khz/1000,
+                                acpu_freq_tbl[i].vdd_core/1000 );
+                  }
+                }
+                mutex_unlock(&driver_lock);
+        }
+        return len;
+}
+
+void vc_set_vdd(const char *buf)
+{
+        int ret, i = 0;
+        char size_cur[16];
+        unsigned int volt;
+//      pr_info("[imoseyon]: store request: %s\n", buf); 
+
+        while(acpu_freq_tbl[i].speed.khz != 0) i++;
+        mutex_lock(&driver_lock);
+        for(i--; i >= 0; i--) {
+          ret = sscanf(buf, "%d", &volt);
+          if (acpu_freq_tbl[i].use_for_scaling) {
+            pr_info("[imoseyon]: voltage for %d changed to %d\n", 
+                acpu_freq_tbl[i].speed.khz, volt*1000);
+            acpu_freq_tbl[i].vdd_core = min(max((unsigned int)volt*1000,
+                (unsigned int)HFPLL_LOW_VDD), (unsigned int)HFPLL_MAX_VDD);
+            ret = sscanf(buf, "%s", size_cur);
+            buf += (strlen(size_cur)+1);
+          }
+        }
+        mutex_unlock(&driver_lock);
+}
+
 #ifdef CONFIG_CPU_FREQ_MSM
-static struct cpufreq_frequency_table freq_table[NR_CPUS][30];
+static struct cpufreq_frequency_table freq_table[NR_CPUS][FREQ_TABLE_SIZE]];
 
 static void __init cpufreq_table_init(void)
 {
@@ -1823,13 +1868,15 @@ static struct acpu_level * __init select_freq_plan(void)
 		kraitv2_apply_vmin(acpu_freq_tbl);
 
 	/* Find the max supported scaling frequency. */
-	for (l = acpu_freq_tbl; l->speed.khz != 0; l++)
-		if (l->use_for_scaling)
-			max_acpu_level = l;
-	BUG_ON(!max_acpu_level);
-	pr_info("Max ACPU freq: %u KHz\n", max_acpu_level->speed.khz);
+	for (l = acpu_freq_tbl; l->speed.khz != 0; l++) {
+                if (l->use_for_scaling)
+                        max_acpu_level = l;
+                if (l->speed.khz > 1458000) break;
+        }
+        BUG_ON(!max_acpu_level);
+        pr_info("Max ACPU freq: %u KHz\n", max_acpu_level->speed.khz);
 
-	return max_acpu_level;
+        return max_acpu_level;
 }
 
 static struct acpuclk_data acpuclk_8960_data = {
