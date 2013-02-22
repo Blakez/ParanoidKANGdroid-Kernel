@@ -70,6 +70,7 @@
 
 #define STBY_KHZ		1
 
+#define HFPLL_NOMINAL_VDD	 1050000
 #define HFPLL_LOW_VDD		 815000
 #define HFPLL_MAX_VDD		1350000
 #define HFPLL_LOW_VDD_PLL_L_MAX	0x28
@@ -1629,7 +1630,7 @@ void vc_set_vdd(const char *buf)
 }
 
 #ifdef CONFIG_CPU_FREQ_MSM
-static struct cpufreq_frequency_table freq_table[NR_CPUS][FREQ_TABLE_SIZE]];
+static struct cpufreq_frequency_table freq_table[NR_CPUS][FREQ_TABLE_SIZE];
 
 static void __init cpufreq_table_init(void)
 {
