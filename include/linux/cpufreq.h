@@ -351,7 +351,7 @@ static inline unsigned int cpufreq_quick_get(unsigned int cpu)
 #ifdef CONFIG_MSM8960_CPU_OVERCLOCK
 #define MAX_FREQ_LIMIT 1512000
 #else
-#define MAX_FREQ_LIMIT 1836000
+#define MAX_FREQ_LIMIT 2052000
 #endif
 
 enum {
