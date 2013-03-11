@@ -87,12 +87,6 @@ config CPU_FREQ_DEFAULT_GOV_WHEATLEY
     select CPU_FREQ_GOV_WHEATLEY
 	---help---	
 	Use the CPUFreq governor 'wheatley' as default.
-	
-config CPU_FREQ_DEFAULT_GOV_SMOOTHASS	
-	bool "smoothass"	
-    select CPU_FREQ_GOV_SMOOTHASS
-	---help---	
-	Use the CPUFreq governor 'smoothass' as default.
 
 config CPU_FREQ_DEFAULT_GOV_ONDEMAND
 	bool "ondemand"
@@ -195,10 +189,6 @@ config CPU_FREQ_GOV_INTELLIDEMAND
 
 config CPU_FREQ_GOV_WHEATLEY	
 	tristate "'wheatley' cpufreq governor"	
-	depends on CPU_FREQ
-	
-config CPU_FREQ_GOV_SMOOTHASS	
-	tristate "'smoothass' cpufreq governor"	
 	depends on CPU_FREQ
 
 config CPU_FREQ_GOV_USERSPACE
