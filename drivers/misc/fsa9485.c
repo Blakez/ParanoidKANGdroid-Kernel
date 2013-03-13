@@ -652,7 +652,7 @@ static int fsa9485_detect_dev(struct fsa9485_usbsw *usbsw)
 			dev_info(&client->dev, "usb connect\n");
 
 			if (pdata->usb_cb) {
-			        if (pdata->charger_cb && force_fast_charge != 0) {
+				if (pdata->charger_cb && force_fast_charge != 0) {
 				  dev_info(&client->dev, "[imoseyon] fastcharge\n");
 				  pdata->charger_cb(FSA9485_ATTACHED);
 				} else pdata->usb_cb(FSA9485_ATTACHED);
