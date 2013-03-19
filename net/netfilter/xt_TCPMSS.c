@@ -1,99 +1,114 @@
-/*
- * This is a module which is used for setting the MSS option in TCP packets.
- *
- * Copyright (C) 2000 Marc Boucher <marc@mbsi.ca>
+/* Kernel module to match TCP MSS values. */
+
+/* Copyright (C) 2000 Marc Boucher <marc@mbsi.ca>
+ * Portions (C) 2005 by Harald Welte <laforge@netfilter.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/module.h>
 #include <linux/skbuff.h>
-#include <linux/ip.h>
-#include <linux/gfp.h>
-#include <linux/ipv6.h>
-#include <linux/tcp.h>
-#include <net/dst.h>
-#include <net/flow.h>
-#include <net/ipv6.h>
-#include <net/route.h>
 #include <net/tcp.h>
+
+#include <linux/netfilter/xt_tcpmss.h>
+#include <linux/netfilter/x_tables.h>
 
 #include <linux/netfilter_ipv4/ip_tables.h>
 #include <linux/netfilter_ipv6/ip6_tables.h>
-#include <linux/netfilter/x_tables.h>
-#include <linux/netfilter/xt_tcpudp.h>
-#include <linux/netfilter/xt_TCPMSS.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Marc Boucher <marc@mbsi.ca>");
-MODULE_DESCRIPTION("Xtables: TCP Maximum Segment Size (MSS) adjustment");
-MODULE_ALIAS("ipt_TCPMSS");
-MODULE_ALIAS("ip6t_TCPMSS");
+MODULE_DESCRIPTION("Xtables: TCP MSS match");
+MODULE_ALIAS("ipt_tcpmss");
+MODULE_ALIAS("ip6t_tcpmss");
 
-static inline unsigned int
-optlen(const u_int8_t *opt, unsigned int offset)
+static bool
+tcpmss_mt(const struct sk_buff *skb, struct xt_action_param *par)
 {
-	/* Beware zero-length options: make finite progress */
-	if (opt[offset] <= TCPOPT_NOP || opt[offset+1] == 0)
-		return 1;
-	else
-		return opt[offset+1];
+	const struct xt_tcpmss_match_info *info = par->matchinfo;
+	const struct tcphdr *th;
+	struct tcphdr _tcph;
+	/* tcp.doff is only 4 bits, ie. max 15 * 4 bytes */
+	const u_int8_t *op;
+	u8 _opt[15 * 4 - sizeof(_tcph)];
+	unsigned int i, optlen;
+
+	/* If we don't have the whole header, drop packet. */
+	th = skb_header_pointer(skb, par->thoff, sizeof(_tcph), &_tcph);
+	if (th == NULL)
+		goto dropit;
+
+	/* Malformed. */
+	if (th->doff*4 < sizeof(*th))
+		goto dropit;
+
+	optlen = th->doff*4 - sizeof(*th);
+	if (!optlen)
+		goto out;
+
+	/* Truncated options. */
+	op = skb_header_pointer(skb, par->thoff + sizeof(*th), optlen, _opt);
+	if (op == NULL)
+		goto dropit;
+
+	for (i = 0; i < optlen; ) {
+		if (op[i] == TCPOPT_MSS
+		    && (optlen - i) >= TCPOLEN_MSS
+		    && op[i+1] == TCPOLEN_MSS) {
+			u_int16_t mssval;
+
+			mssval = (op[i+2] << 8) | op[i+3];
+
+			return (mssval >= info->mss_min &&
+				mssval <= info->mss_max) ^ info->invert;
+		}
+		if (op[i] < 2)
+			i++;
+		else
+			i += op[i+1] ? : 1;
+	}
+out:
+	return info->invert;
+
+dropit:
+	par->hotdrop = true;
+	return false;
 }
 
-static int
-tcpmss_mangle_packet(struct sk_buff *skb,
-		     const struct xt_tcpmss_info *info,
-		     unsigned int in_mtu,
-		     unsigned int tcphoff,
-		     unsigned int minlen)
+static struct xt_match tcpmss_mt_reg[] __read_mostly = {
+	{
+		.name		= "tcpmss",
+		.family		= NFPROTO_IPV4,
+		.match		= tcpmss_mt,
+		.matchsize	= sizeof(struct xt_tcpmss_match_info),
+		.proto		= IPPROTO_TCP,
+		.me		= THIS_MODULE,
+	},
+	{
+		.name		= "tcpmss",
+		.family		= NFPROTO_IPV6,
+		.match		= tcpmss_mt,
+		.matchsize	= sizeof(struct xt_tcpmss_match_info),
+		.proto		= IPPROTO_TCP,
+		.me		= THIS_MODULE,
+	},
+};
+
+static int __init tcpmss_mt_init(void)
 {
-	struct tcphdr *tcph;
-	unsigned int tcplen, i;
-	__be16 oldval;
-	u16 newmss;
-	u8 *opt;
+	return xt_register_matches(tcpmss_mt_reg, ARRAY_SIZE(tcpmss_mt_reg));
+}
 
-	if (!skb_make_writable(skb, skb->len))
-		return -1;
+static void __exit tcpmss_mt_exit(void)
+{
+	xt_unregister_matches(tcpmss_mt_reg, ARRAY_SIZE(tcpmss_mt_reg));
+}
 
-	tcplen = skb->len - tcphoff;
-	tcph = (struct tcphdr *)(skb_network_header(skb) + tcphoff);
-
-	/* Header cannot be larger than the packet */
-	if (tcplen < tcph->doff*4)
-		return -1;
-
-	if (info->mss == XT_TCPMSS_CLAMP_PMTU) {
-		if (dst_mtu(skb_dst(skb)) <= minlen) {
-			if (net_ratelimit())
-				pr_err("unknown or invalid path-MTU (%u)\n",
-				       dst_mtu(skb_dst(skb)));
-			return -1;
-		}
-		if (in_mtu <= minlen) {
-			if (net_ratelimit())
-				pr_err("unknown or invalid path-MTU (%u)\n",
-				       in_mtu);
-			return -1;
-		}
-		newmss = min(dst_mtu(skb_dst(skb)), in_mtu) - minlen;
-	} else
-		newmss = info->mss;
-
-	opt = (u_int8_t *)tcph;
-	for (i = sizeof(struct tcphdr); i < tcph->doff*4; i += optlen(opt, i)) {
-		if (opt[i] == TCPOPT_MSS && tcph->doff*4 - i >= TCPOLEN_MSS &&
-		    opt[i+1] == TCPOLEN_MSS) {
-			u_int16_t oldmss;
-
-			oldmss = (opt[i+2] << 8) | opt[i+3];
-
-			/* Never increase MSS, even when setting it, as
-			 * doing so results in problems for hosts that rely
-			 * on MSS being set correctly.
-			 */
+module_init(tcpmss_mt_init);
+module_exit(tcpmss_mt_exit);
+/
 			if (oldmss <= newmss)
 				return 0;
 
@@ -161,7 +176,7 @@ static u_int32_t tcpmss_reverse_mtu(const struct sk_buff *skb,
 		struct flowi6 *fl6 = &fl.u.ip6;
 
 		memset(fl6, 0, sizeof(*fl6));
-		ipv6_addr_copy(&fl6->daddr, &ipv6_hdr(skb)->saddr);
+		fl6->daddr = ipv6_hdr(skb)->saddr;
 	}
 	rcu_read_lock();
 	ai = nf_get_afinfo(family);
@@ -198,17 +213,18 @@ tcpmss_tg4(struct sk_buff *skb, const struct xt_action_param *par)
 	return XT_CONTINUE;
 }
 
-#if defined(CONFIG_IP6_NF_IPTABLES) || defined(CONFIG_IP6_NF_IPTABLES_MODULE)
+#if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
 static unsigned int
 tcpmss_tg6(struct sk_buff *skb, const struct xt_action_param *par)
 {
 	struct ipv6hdr *ipv6h = ipv6_hdr(skb);
 	u8 nexthdr;
+	__be16 frag_off;
 	int tcphoff;
 	int ret;
 
 	nexthdr = ipv6h->nexthdr;
-	tcphoff = ipv6_skip_exthdr(skb, sizeof(*ipv6h), &nexthdr);
+	tcphoff = ipv6_skip_exthdr(skb, sizeof(*ipv6h), &nexthdr, &frag_off);
 	if (tcphoff < 0)
 		return NF_DROP;
 	ret = tcpmss_mangle_packet(skb, par->targinfo,
@@ -259,7 +275,7 @@ static int tcpmss_tg4_check(const struct xt_tgchk_param *par)
 	return -EINVAL;
 }
 
-#if defined(CONFIG_IP6_NF_IPTABLES) || defined(CONFIG_IP6_NF_IPTABLES_MODULE)
+#if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
 static int tcpmss_tg6_check(const struct xt_tgchk_param *par)
 {
 	const struct xt_tcpmss_info *info = par->targinfo;
@@ -292,7 +308,7 @@ static struct xt_target tcpmss_tg_reg[] __read_mostly = {
 		.proto		= IPPROTO_TCP,
 		.me		= THIS_MODULE,
 	},
-#if defined(CONFIG_IP6_NF_IPTABLES) || defined(CONFIG_IP6_NF_IPTABLES_MODULE)
+#if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
 	{
 		.family		= NFPROTO_IPV6,
 		.name		= "TCPMSS",
