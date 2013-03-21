@@ -22,7 +22,6 @@
 #include "pm.h"
 #include "spm.h"
 
-#ifdef CONFIG_SMP
 extern volatile int pen_release;
 
 struct msm_hotplug_device {
@@ -68,7 +67,6 @@ static inline void platform_do_lowpower(unsigned int cpu, int *spurious)
 		(*spurious)++;
 	}
 }
-#endif
 
 int platform_cpu_kill(unsigned int cpu)
 {
