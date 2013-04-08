@@ -14,8 +14,6 @@ obj-$(CONFIG_CPU_FREQ_GOV_ASSWAX)	+= cpufreq_asswax.o
 obj-$(CONFIG_CPU_FREQ_GOV_BADASS)       += cpufreq_badass.o
 obj-$(CONFIG_CPU_FREQ_GOV_WHEATLEY)	+= cpufreq_wheatley.o
 obj-$(CONFIG_CPU_FREQ_GOV_INTELLIDEMAND) += cpufreq_intellidemand.o
-obj-$(CONFIG_CPU_FREQ_GOV_NIGHTMARE)  += cpufreq_nightmare.o
-obj-$(CONFIG_CPU_FREQ_GOV_PEGASUSQ)  += cpufreq_pegasusq.o
 
 
 # CPUfreq cross-arch helpers
