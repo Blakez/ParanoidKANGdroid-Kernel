@@ -445,31 +445,8 @@ static ssize_t store_##file_name					\
 	return ret ? ret : count;					\
 }
 
-//store_one(scaling_min_freq, min);
+store_one(scaling_min_freq, min);
 store_one(scaling_max_freq, max);
-
-static ssize_t store_scaling_min_freq(struct cpufreq_policy *policy, const char *buf, size_t count)
-{
-	unsigned int ret = -EINVAL;
-	unsigned int value = 0;
-	struct cpufreq_policy new_policy;
-
-	ret = sscanf(buf, "%u", &value);
-	if (ret != 1)
-		return -EINVAL;
-
-	if (value == 384000)
-		value = 216000;
-
-	if (!cpu_online(policy->cpu)) cpu_up(policy->cpu);
-
-	ret = cpufreq_get_policy(&new_policy, policy->cpu);
-	new_policy.min = value;
-	ret = __cpufreq_set_policy(policy, &new_policy);
-	policy->user_policy.min = policy->min;
-
-	return count;
-}
 
 /**
  * show_cpuinfo_cur_freq - current CPU frequency as detected by hardware
